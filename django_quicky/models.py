@@ -5,10 +5,13 @@
 import types
 
 from random import randint
-
+from django.db import models
 from django.shortcuts import _get_queryset
 from django.db.models import Max
 from django.db.models.fields import Field
+from django.db.models.fields.related import ForeignRelatedObjectsDescriptor, ReverseManyRelatedObjectsDescriptor, ForeignKey, \
+    ReverseSingleRelatedObjectDescriptor
+from django.db.models.base import ModelBase
 
 
 __all__ = ['get_random_objects', 'get_object_or_none', 'patch_model']
@@ -133,3 +136,123 @@ def patch_model(model_to_patch, class_to_patch_with):
 
         # Add the new field/method name and object to the model.
         model_to_patch.add_to_class(name, obj)
+
+
+class JSONDataMixin(object):
+    full_info_fields = []
+    simple_info_fields = []
+    show_json_comment = False
+
+    @classmethod
+    def find_field(cls, name):
+        for field in cls._meta.local_fields:
+            if field.name == name:
+                return field
+        return None
+
+    @classmethod
+    def get_full_info_fields(cls):
+        return cls.full_info_fields
+
+    @classmethod
+    def get_simple_info_fields(cls):
+        print '>>>>', cls.full_info_fields
+        return cls.simple_info_fields or cls.full_info_fields
+
+    def _get_field_data(self, name):
+        extra = 'simple'
+        if name.find('.') != -1:
+            name, extra = name.split('.')
+
+            is_simple_info = extra != 'full'
+        else:
+            is_simple_info = getattr(self._state, 'is_simple_info', True)
+
+        field = self.find_field(name)
+        if not hasattr(self, name):
+            return None
+        if field:
+            short_desc = field.verbose_name
+        else:
+            short_desc = ''
+
+        v = getattr(self, name)
+        if not v:
+            return name, None, short_desc
+
+        if type(v) == types.MethodType:
+
+            if hasattr(v, '__name__'):
+                name = v.__name__
+            if hasattr(v, 'short_description'):
+                short_desc = v.short_description
+            v = v()
+        else:
+            if isinstance(field, models.ForeignKey):
+                if extra not in ['simple', 'full']:
+                    v = getattr(v, extra, None)
+                else:
+                    v._state.is_simple_info = is_simple_info
+                    v = v.json_data()
+
+            elif repr(v).find('RelatedManager') != -1:
+                fks = []
+                for x in v.all():
+                    x._state.is_simple_info = is_simple_info
+                    fks.append(x.json_data())
+                v = fks
+            else:
+                if hasattr(v, '__name__'):
+                    name = v.__name__
+                if hasattr(v, 'short_description'):
+                    short_desc = v.short_description
+                if callable(v):
+                    v = v()
+
+        return name, v, short_desc
+
+    def _get_fields_data(self, fieldset):
+        res = {}
+        comments = {}
+        for fields in fieldset:
+            if isinstance(fields, basestring):
+                ret = self._get_field_data(fields)
+                if not ret:
+                    continue
+                res[ret[0]] = ret[1]
+                if self.show_json_comment:
+                    comments[ret[0]] = ret[2]
+            else:
+                name, fields = fields
+                res[name] = {}
+                comments[name] = {}
+                for field in fields:
+                    ret = self._get_field_data(field)
+                    if not ret:
+                        continue
+                    res[name][ret[0]] = ret[1]
+                    if self.show_json_comment:
+                        comments[name][ret[0]] = ret[2]
+
+        if self.show_json_comment:
+            res['_comments'] = comments
+        return res
+
+    def full_info(self):
+        return self._get_fields_data(self.__class__.get_full_info_fields())
+
+    def simple_info(self):
+        return self._get_fields_data(self.__class__.get_simple_info_fields())
+
+    def simple(self):
+        self._state.is_simple_info = True
+
+    def full(self):
+        self._state.is_simple_info = False
+
+    def json_data(self):
+        if getattr(self._state, 'is_simple_info', True):
+            return self.simple_info()
+        return self.full_info()
+
+

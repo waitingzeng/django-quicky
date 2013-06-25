@@ -135,6 +135,16 @@ def view(render_to=None):
 
     return decorator
 
+def ajax_success(data={}, **kwargs):
+    data = {'ret': 0, 'data': data}
+    data.update(kwargs)
+    return data
+
+
+def ajax_fail(ret=-1, data={}, **kwargs):
+    data = {'ret': ret, 'data': data}
+    data.update(kwargs)
+    return data
 
 def routing(root=""):
     """
@@ -185,7 +195,6 @@ def routing(root=""):
 
     return url, urlpatterns
 
-
 class UrlList(list):
     """
         Sublass list to allow shortcuts to add urls to this pattern.
@@ -210,3 +219,5 @@ class UrlList(list):
         self.include(url, admin.site.urls, 'admin')
 
         UrlList.admin_added = True
+
+url, urlpatterns = routing()
